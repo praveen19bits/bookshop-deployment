@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: postgres-config
   labels:
-    db: polar-postgres
+    db: bookshop-postgres
 data:
   init.sql: |
     CREATE DATABASE bookshop_catalog;

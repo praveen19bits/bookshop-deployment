@@ -20,19 +20,35 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://bookshop-postgres:5432/bookshop_catalog
       - SPRING_PROFILES_ACTIVE=testdata
   order-service:
+     depends_on:
+       - bookshop-postgres
+     image: "order-service"
+     container_name: "order-service"
+     ports:
+       - 9002:9002
+       - 8002:8002
+     environment:
+       # Buildpacks environment variable to enable debug through a socket on port 8002
+       - BPL_DEBUG_ENABLED=true
+       - BPL_DEBUG_PORT=8002
+       - BOOKSHOP_CATALOG_SERVICE_URI=http://catalog-service:9001
+       - SPRING_R2DBC_URL=r2dbc:postgresql://bookshop-postgres:5432/bookshop_order
+
+  edge-service:
     depends_on:
-      - bookshop-postgres
-    image: "order-service"
-    container_name: "order-service"
+      - booskshop-redis
+    image: "edge-service"
+    container_name: "edge-service"
     ports:
-      - 9002:9002
-      - 8002:8002
+      - 9000:9000
+      - 8000:8000
     environment:
-      # Buildpacks environment variable to enable debug through a socket on port 8002
+      # Buildpacks environment variable to enable debug through a socket on port 8000
       - BPL_DEBUG_ENABLED=true
-      - BPL_DEBUG_PORT=8002
-      - BOOKSHOP_CATALOG_SERVICE_URI=http://catalog-service:9001
-      - SPRING_R2DBC_URL=r2dbc:postgresql://bookshop-postgres:5432/bookshop_order
+      - BPL_DEBUG_PORT=8000
+      - BOOKSHOP_CATALOG_SERVICE_URL=http://catalog-service:9001
+      - BOOKSHOP_ORDER_SERVICE_URL=http://order-service:9002
+      - SPRING_REDIS_HOST=booskshop-redis
 
   # Backing Services
 
@@ -46,3 +62,9 @@ services:
       - POSTGRES_PASSWORD=password
     volumes:
       - ./postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  booskshop-redis:
+    image: "redis:7.0"
+    container_name: "bookshop-redis"
+    ports:
+      - 6379:6379
