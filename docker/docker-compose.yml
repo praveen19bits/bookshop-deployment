@@ -5,7 +5,9 @@ services:
 
   catalog-service:
     depends_on:
+      - fluent-bit
       - bookshop-postgres
+      - tempo
     image: "catalog-service"
     container_name: "catalog-service"
     ports:
@@ -17,10 +19,23 @@ services:
       # Buildpacks environment variable to enable debug through a socket on port 8001
       - BPL_DEBUG_ENABLED=true
       - BPL_DEBUG_PORT=8001
+      - TRACING_URL=http://tempo:4318/v1/traces
+      #- JAVA_TOOL_OPTIONS=-javaagent:/workspace/BOOT-INF/lib/opentelemetry-javaagent-1.17.0.jar
+#      - OTEL_SERVICE_NAME=catalog-service
+#      - OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http
+#      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
+#      - OTEL_METRICS_EXPORTER=none
       - SPRING_DATASOURCE_URL=jdbc:postgresql://bookshop-postgres:5432/bookshop_catalog
       - SPRING_PROFILES_ACTIVE=testdata
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
+
+
   order-service:
      depends_on:
+       - fluent-bit
        - bookshop-postgres
      image: "order-service"
      container_name: "order-service"
@@ -31,11 +46,22 @@ services:
        # Buildpacks environment variable to enable debug through a socket on port 8002
        - BPL_DEBUG_ENABLED=true
        - BPL_DEBUG_PORT=8002
+       - TRACING_URL=http://tempo:4318/v1/traces
+       #- JAVA_TOOL_OPTIONS=-javaagent:/workspace/BOOT-INF/lib/opentelemetry-javaagent-1.17.0.jar
+#       - OTEL_SERVICE_NAME=order-service
+#       - OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http
+#       - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+#       - OTEL_METRICS_EXPORTER=none
        - BOOKSHOP_CATALOG_SERVICE_URI=http://catalog-service:9001
        - SPRING_R2DBC_URL=r2dbc:postgresql://bookshop-postgres:5432/bookshop_order
+     logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
 
   edge-service:
     depends_on:
+      - fluent-bit
       - booskshop-redis
     image: "edge-service"
     container_name: "edge-service"
@@ -46,9 +72,18 @@ services:
       # Buildpacks environment variable to enable debug through a socket on port 8000
       - BPL_DEBUG_ENABLED=true
       - BPL_DEBUG_PORT=8000
+      - TRACING_URL=http://tempo:4318/v1/traces
+#      - JAVA_TOOL_OPTIONS=-javaagent:/workspace/BOOT-INF/lib/opentelemetry-javaagent-1.17.0.jar
+#      - OTEL_SERVICE_NAME=edge-service
+#      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+#      - OTEL_METRICS_EXPORTER=none
       - BOOKSHOP_CATALOG_SERVICE_URL=http://catalog-service:9001
       - BOOKSHOP_ORDER_SERVICE_URL=http://order-service:9002
       - SPRING_REDIS_HOST=booskshop-redis
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: 127.0.0.1:24224
 
   # Backing Services
 
@@ -68,3 +103,57 @@ services:
     container_name: "bookshop-redis"
     ports:
       - 6379:6379
+
+
+  # Observability
+
+  grafana:
+    image: grafana/grafana:9.1.2
+    container_name: grafana
+    depends_on:
+      - loki
+      - prometheus
+      - tempo
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=user
+      - GF_SECURITY_ADMIN_PASSWORD=password
+    volumes:
+      - ./observability/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./observability/grafana/grafana.ini:/etc/grafana/grafana.ini
+
+  loki:
+    image: grafana/loki:2.6.1
+    container_name: loki
+    depends_on:
+      - fluent-bit
+    ports:
+      - "3100:3100"
+
+  fluent-bit:
+    image: grafana/fluent-bit-plugin-loki:2.6.1-amd64
+    container_name: fluent-bit
+    ports:
+      - "24224:24224"
+    environment:
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+    volumes:
+      - ./observability/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
+  prometheus:
+    image: prom/prometheus:v2.38.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+  tempo:
+    image: grafana/tempo:1.5.0
+    container_name: tempo
+    command: -config.file /etc/tempo-config.yml
+    ports:
+      - "3110:3100"     # Tempo
+      - "4318:4318"     # OTel
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo-config.yml
